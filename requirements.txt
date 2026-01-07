@@ -1,0 +1,6 @@
+streamlit
+neo4j
+groq
+sentence-transformers
+pymupdf
+plotly
