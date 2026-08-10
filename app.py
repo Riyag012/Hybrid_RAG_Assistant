@@ -40,7 +40,8 @@ def load_models():
 
 class GraphRAG:
     def __init__(self, g_key, n_uri, n_pass):
-        self.driver = GraphDatabase.driver(n_uri, auth=("neo4j", n_pass))
+        # Using the explicit username instance provided by AuraDB
+        self.driver = GraphDatabase.driver(n_uri, auth=("c35c6e15", n_pass))
         self.groq = Groq(api_key=g_key)
         self.embed, self.rerank = load_models()
         self.index = "chunk_vector_index"
@@ -126,13 +127,19 @@ class GraphRAG:
         # 1. Retrieval
         vec = self.embed.encode(text).tolist()
         
-        # CRITICAL FIX: Changed MATCH to OPTIONAL MATCH
-        # This ensures we get results even if the Graph Extraction failed for that chunk
+        # --- MULTI-HOP CYPHER FIX ---
+        # 1. Find the chunk via vector similarity
+        # 2. MATCH immediate entities (e1)
+        # 3. OPTIONAL MATCH hops to a second chunk (c2) connected by relationships
         q = f"""
         CALL db.index.vector.queryNodes('{self.index}', 10, $v) 
         YIELD node AS c, score 
-        OPTIONAL MATCH (c)-[:MENTIONS]->(e) 
-        RETURN c.text as text, collect(distinct e.name) as ents
+        OPTIONAL MATCH (c)-[:MENTIONS]->(e1)
+        OPTIONAL MATCH (c)-[:MENTIONS]->(:Entity)-[:RELATED]-(:Entity)<-[:MENTIONS]-(c2:Chunk)
+        WHERE c2 <> c
+        RETURN c.text as text, 
+               collect(distinct e1.name) as ents,
+               collect(distinct c2.text)[..2] as extra_chunks
         """
         
         with self.driver.session() as session:
@@ -149,8 +156,18 @@ class GraphRAG:
         scores = self.rerank.predict(pairs)
         top_docs = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)[:3]
         
-        # 3. Generation
-        context = "\n".join([d[0]['text'] for d in top_docs])[:15000]
+        # --- MULTI-HOP GENERATION FIX ---
+        context = ""
+        for d in top_docs:
+            chunk_text = d[0]['text']
+            entities = ", ".join(d[0]['ents'])
+            
+            # Format the newly retrieved multi-hop chunks safely
+            extra_chunks = " \n".join(d[0]['extra_chunks']) if d[0]['extra_chunks'] else "None"
+            
+            context += f"Text: {chunk_text}\n"
+            context += f"Related Graph Entities: {entities}\n"
+            context += f"Multi-Hop Connected Text: {extra_chunks}\n\n"
         
         prompt = f"""
         Use the context below to answer the question.
