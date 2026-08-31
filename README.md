@@ -43,6 +43,9 @@ Not all RAG systems are created equal. Here is why we chose a **Hybrid** approac
 
 > **Why Hybrid Wins:** We use `OPTIONAL MATCH` logic. If the Graph has the answer, we get precision. If the Graph misses it (e.g., a standalone number), Vector Search catches it. **We get the best of both worlds.**
 
+![Ingestion Pipeline](ss/ingestion.png)
+![Generation Pipeline](ss/generation.png)
+
 ## 📊 Benchmark Results (The Proof)
 We benchmarked this system against a Standard RAG implementation using **30 "Hard" Financial Questions** from Tesla and Apple 2023 reports.
 
